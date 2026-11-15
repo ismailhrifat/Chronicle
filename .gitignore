@@ -10,3 +10,8 @@ firebase-debug.log
 
 # Firebase project config. Download your own from the Firebase console into app/.
 google-services.json
+
+# Release signing key and its passwords. Never commit; keep a backup somewhere safe.
+*.jks
+*.keystore
+keystore.properties
