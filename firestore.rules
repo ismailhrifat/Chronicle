@@ -1,0 +1,120 @@
+rules_version = '2';
+
+// Chronicle: every document lives under users/{uid} and is reachable only by that user.
+// Writes must match the exact shape the app produces; anything else is rejected.
+//
+// Note on rate limiting: security rules keep no state between requests, so a time-based
+// limit would need a counter document written with every change. The app queues writes while
+// offline and flushes them in a burst, which such a limit would reject and silently drop.
+// Abuse is bounded here instead by strict shapes and hard caps on every string and list
+// (a document can never grow past a few hundred KB), and each user can only spend quota on
+// their own subtree.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function text(v, max) {
+      return v is string && v.size() <= max;
+    }
+
+    function money(v) {
+      return v is int && v >= -100000000000000 && v <= 100000000000000;
+    }
+
+    function amount(v) {
+      return v is int && v >= 0 && v <= 100000000000000;
+    }
+
+    function validAccount(d) {
+      return d.keys().hasOnly(['name', 'type', 'color', 'settlementDay', 'dueDay', 'remindDaysBefore',
+                               'smsRules', 'balance', 'createdAt', 'order'])
+        && d.keys().hasAll(['name', 'type'])
+        && text(d.name, 100)
+        && d.type in ['CASH', 'BANK', 'CREDIT_CARD', 'FDR', 'DPS']
+        && (!('balance' in d) || money(d.balance))
+        && (!('color' in d) || d.color is int)
+        && (!('createdAt' in d) || d.createdAt is int)
+        && (!('order' in d) || d.order == null || d.order is int)
+        && (!('settlementDay' in d) || d.settlementDay == null || (d.settlementDay is int && d.settlementDay >= 1 && d.settlementDay <= 31))
+        && (!('dueDay' in d) || d.dueDay == null || (d.dueDay is int && d.dueDay >= 1 && d.dueDay <= 31))
+        && (!('remindDaysBefore' in d) || (d.remindDaysBefore is int && d.remindDaysBefore >= 0 && d.remindDaysBefore <= 31))
+        && (!('smsRules' in d) || (d.smsRules is list && d.smsRules.size() <= 50));
+    }
+
+    function validTransaction(d) {
+      return d.keys().hasOnly(['kind', 'amount', 'accountId', 'toAccountId', 'category', 'description',
+                               'timestamp', 'autoLogged', 'eventId'])
+        && d.keys().hasAll(['kind', 'amount', 'accountId', 'timestamp'])
+        && d.kind in ['EXPENSE', 'INCOME', 'TRANSFER', 'DEBT_OUT', 'DEBT_IN']
+        && amount(d.amount)
+        && text(d.accountId, 200)
+        && d.timestamp is int
+        && (!('toAccountId' in d) || d.toAccountId == null || text(d.toAccountId, 200))
+        && (!('category' in d) || text(d.category, 200))
+        && (!('description' in d) || text(d.description, 2000))
+        && (!('autoLogged' in d) || d.autoLogged is bool)
+        && (!('eventId' in d) || d.eventId == null || text(d.eventId, 200));
+    }
+
+    function validCategory(d) {
+      return d.keys().hasOnly(['name', 'kind'])
+        && d.keys().hasAll(['name', 'kind'])
+        && text(d.name, 100) && d.name.size() > 0
+        && d.kind in ['EXPENSE', 'INCOME'];
+    }
+
+    function validEvent(d) {
+      return d.keys().hasOnly(['name', 'closed', 'createdAt'])
+        && d.keys().hasAll(['name'])
+        && text(d.name, 100) && d.name.size() > 0
+        && (!('closed' in d) || d.closed is bool)
+        && (!('createdAt' in d) || d.createdAt is int);
+    }
+
+    function validDebt(d) {
+      return d.keys().hasOnly(['name', 'description', 'type', 'amount', 'originalAmount', 'status',
+                               'lastUpdated', 'records', 'archived'])
+        && d.keys().hasAll(['name', 'type', 'amount', 'records'])
+        && text(d.name, 200) && d.name.size() > 0
+        && d.type in ['lent', 'borrowed']
+        && amount(d.amount)
+        && d.records is list && d.records.size() <= 1000
+        && (!('description' in d) || text(d.description, 2000))
+        && (!('originalAmount' in d) || amount(d.originalAmount))
+        && (!('status' in d) || d.status in ['active', 'closed'])
+        && (!('lastUpdated' in d) || text(d.lastUpdated, 40))
+        && (!('archived' in d) || d.archived is bool);
+    }
+
+    match /users/{uid} {
+      match /accounts/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validAccount(request.resource.data);
+      }
+      match /transactions/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validTransaction(request.resource.data);
+      }
+      match /categories/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validCategory(request.resource.data);
+      }
+      match /events/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validEvent(request.resource.data);
+      }
+      match /debts/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validDebt(request.resource.data);
+      }
+    }
+
+    // Everything else, including any path not listed above, is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

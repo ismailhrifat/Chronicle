@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- open ring: a quiet "C" -->
+    <path
+        android:pathData="M67.4,41.2 A18,18 0 1,0 67.4,66.8"
+        android:strokeColor="#3F6B5C" android:strokeWidth="6.5"
+        android:strokeLineCap="round" android:fillColor="#00000000" />
+    <!-- ledger marks -->
+    <path
+        android:pathData="M50,49 H62 M50,59 H58"
+        android:strokeColor="#3F6B5C" android:strokeWidth="4.5"
+        android:strokeLineCap="round" android:strokeAlpha="0.55" />
+</vector>
